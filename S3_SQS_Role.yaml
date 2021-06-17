@@ -1,0 +1,94 @@
+Parameters:
+  BucketName:
+    Description: S3 Bucket BucketName
+    Type: String
+  RoleName:
+    Description: Role Name (To access S3 and SQS)
+    Type: String
+  SQSName:
+    Description: SQS Name
+    Type: String
+
+Resources:
+
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties: 
+      QueueName: !Ref SQSName
+
+  SQSAccessPolicy: 
+    Type: AWS::SQS::QueuePolicy
+    Properties: 
+      Queues: 
+        - !Ref SQSQueue
+      PolicyDocument: 
+        Statement:
+        - Action:
+            - 'SQS:SendMessage'
+          Effect: Allow
+          Resource: !GetAtt SQSQueue.Arn
+          Principal: '*'
+          Condition:
+            ArnLike:
+              aws:SourceArn: !Join
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref BucketName
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn: SQSAccessPolicy
+    Properties:
+      BucketName: !Ref BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'AES256'
+      AccessControl: Private
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt SQSQueue.Arn
+
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Join
+          - ''
+          - - !Ref AWS::Region
+            - '_'
+            - !Ref RoleName
+      Description: 'IAM Policy to access SQS and S3' 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: SQSReceive
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'SQS:ReceiveMessage'
+                Resource: !GetAtt SQSQueue.Arn
+        - PolicyName: S3FullAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'S3:*'
+                Resource: !GetAtt S3Bucket.Arn
+
+Outputs:
+  RoleID:
+    Description: IAM Role ID 
+    Value: !Ref IAMRole
+    Export:
+      Name: RoleID
+        

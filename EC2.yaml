@@ -1,0 +1,107 @@
+Parameters:
+
+  ProjectName:
+    Type: String
+    Description: Project Name
+  VPCCIDR:
+    Type: String
+    Description: VPC CIDR Range
+    Default: 192.168.100.0/24
+  SubnetCIDR:
+    Type: String
+    Description: Subnet CIDR Range
+    Default: 192.168.100.0/25
+  SubnetAZ:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Subnet AvailabilityZone
+  AMIId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI ID
+    
+    
+Resources:
+  # VP,Subnet,RT,IGW,SG,RT-Association,EC2,EC2-profile(import from output)
+  NetworkVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value: !Join ["", [!Ref ProjectName, -VPC]]
+
+  NetworkSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVPC
+      CidrBlock: !Ref SubnetCIDR
+      AvailabilityZone: !Ref SubnetAZ
+      MapPublicIpOnLaunch: "true"
+      Tags:
+      - Key: Name
+        Value: !Join ["", [!Ref ProjectName, -Subnet-1]]
+
+  NetworkRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:  !Ref NetworkVPC
+      Tags:
+      - Key: Name
+        Value: !Join ["", [!Ref ProjectName, -RT-1]]
+
+  NetworkInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Join ["", [!Ref ProjectName, -IGW]]
+
+  IGWAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref NetworkInternetGateway
+      VpcId: !Ref NetworkVPC
+
+  NetworkRouteTableEntry:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttach
+    Properties:
+        RouteTableId: !Ref NetworkRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: !Ref NetworkInternetGateway
+
+  NetworkSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref NetworkSubnet
+      RouteTableId: !Ref NetworkRouteTable 
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: !Join ["", [!Ref ProjectName, -Allow SSH]]
+        VpcId: !Ref NetworkVPC
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  Ec2Instance: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: !Ref AMIId
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds:
+        - !GetAtt "InstanceSecurityGroup.GroupId"
+      SubnetId: !Ref NetworkSubnet
+
+  InstanceProfile: 
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      InstanceProfileName: "Role-for-EC2"
+      Path: "/"
+      Roles: 
+        - !ImportValue RoleID
